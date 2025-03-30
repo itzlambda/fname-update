@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { WagmiProvider, createConfig } from "wagmi";
-import { mainnet, optimism, base, sepolia } from "wagmi/chains";
+import { mainnet, optimism } from "wagmi/chains";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ConnectKitProvider, getDefaultConfig } from "connectkit";
 import { Toaster } from "@/components/ui/sonner";
