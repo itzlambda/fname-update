@@ -2,29 +2,35 @@
 
 import { useState } from "react";
 import { ConnectKitButton } from "connectkit";
-import { useAccount, useSignTypedData, useReadContract } from "wagmi";
+import { useAccount, useReadContract, useWalletClient } from "wagmi";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardFooter,
+  CardDescription,
+} from "@/components/ui/card";
 import { toast } from "sonner";
-import { Hex } from "viem";
+import { Hex, bytesToHex } from "viem";
 import { ID_REGISTRY_ADDRESS, idRegistryABI } from "@/lib/constants"; // Use local constants
+import {
+  makeUserNameProofClaim,
+  ViemWalletEip712Signer,
+} from "@farcaster/hub-web";
 import React from "react"; // Import React for useEffect
-
-// EIP-712 Domain and Types for Farcaster UserNameProof
-const FARCASTER_USERNAME_PROOF_EIP712_DOMAIN = {
-  name: "Farcaster name verification",
-  version: "1",
-  chainId: 1,
-  verifyingContract: "0x00000000fcb080a4d6c39a9354da9eb9bc104cd7",
-} as const;
-
-const FARCASTER_USERNAME_PROOF_TYPE = [
-  { name: "name", type: "string" },
-  { name: "timestamp", type: "uint256" },
-  { name: "owner", type: "address" },
-] as const;
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger, // We might not need Trigger if we control open state manually
+} from "@/components/ui/dialog";
 
 // Type for individual transfer object from fname server
 type FnameTransfer = {
@@ -126,13 +132,16 @@ async function isUsernameTaken(username: string): Promise<boolean> {
 
 export default function Home() {
   const { address, isConnected } = useAccount();
-  const { signTypedDataAsync } = useSignTypedData();
+  const { data: walletClient } = useWalletClient(); // Get the Viem WalletClient
   const [newFname, setNewFname] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingFid, setIsLoadingFid] = useState(true); // Loading state for FID fetch
   const [isLoadingCurrentFname, setIsLoadingCurrentFname] = useState(false); // Loading state for fname fetch
   const [fetchedFid, setFetchedFid] = useState<number | null>(null);
   const [fetchedCurrentFname, setFetchedCurrentFname] = useState<string | null>(null); // State for fetched fname
+  const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false); // State for dialog visibility
+  const [confirmationInput, setConfirmationInput] = useState(""); // State for confirmation input
+  const [confirmationError, setConfirmationError] = useState<string | null>(null); // State for confirmation error message
 
 
   // --- Fetch FID ---
@@ -199,36 +208,75 @@ export default function Home() {
   const generateSignature = async (
     fname: string,
     owner: Hex,
-    timestamp: number
+    timestamp: number // Input is seconds
   ): Promise<{ signature: Hex; timestamp: number }> => {
-    if (!signTypedDataAsync) {
-      throw new Error("Wallet signing function not available.");
+    // Check for wallet client first
+    if (!walletClient) {
+      throw new Error("Wallet client not available.");
     }
 
-    const claim = {
+    // Use makeUserNameProofClaim from the SDK
+    // Let makeUserNameProofClaim handle validation and return the correct type
+    // It expects timestamp as number/bigint according to some sources, but EIP712 uses uint256 (bigint)
+    // Linter error indicates it expects number input.
+    const claim = makeUserNameProofClaim({
       name: fname,
-      timestamp: BigInt(timestamp),
+      timestamp: timestamp, // Pass number directly as indicated by linter
       owner: owner,
-    };
+    });
+
+    // Instantiate the signer
+    walletClient.switchChain({
+      id: 1,
+    });
+    const eip712Signer = new ViemWalletEip712Signer(walletClient);
+
+    // If makeUserNameProofClaim failed (returned an error object, though docs suggest it throws)
+    // We might need error handling if it *doesn't* throw but returns a Result type
+    // Assuming it throws for now based on common patterns
 
     try {
-      const signature = await signTypedDataAsync({
-        domain: FARCASTER_USERNAME_PROOF_EIP712_DOMAIN,
-        types: { UserNameProof: FARCASTER_USERNAME_PROOF_TYPE },
-        primaryType: 'UserNameProof',
-        message: claim,
-      });
-      return { signature, timestamp };
+      // Use the signer to sign the claim
+      // This returns a Result object, so we need to handle success/error
+      const signResult = await eip712Signer.signUserNameProofClaim(claim);
+
+      if (signResult.isErr()) {
+        // Handle signature error
+        console.error("Signature failed:", signResult.error);
+        let errorMessage = "Failed to sign the message.";
+        // Check for user rejection specifically
+        if (signResult.error.message.includes("rejected") || signResult.error.message.includes("4001")) {
+          errorMessage = "Signature request rejected by user.";
+        }
+        throw new Error(errorMessage + `: ${signResult.error.message}`); // Include original error
+      }
+
+      // Signature successful, get the value
+      const signatureBytes = signResult.value;
+      const signatureHex = bytesToHex(signatureBytes); // Convert Uint8Array to Hex
+
+      return { signature: signatureHex, timestamp }; // Return original number timestamp
     } catch (error) {
-      console.error("Signature failed:", error);
+      console.error("Signature failed:", error); // Log the original error object
       let errorMessage = "Failed to sign the message.";
+      let detail = "";
+
+      if (error instanceof Error) {
+        detail = error.message; // Get message from standard Error object
+      }
+
+      // Check for specific wallet error codes (like user rejection)
       if (typeof error === 'object' && error !== null && 'code' in error) {
         const errorCode = (error as { code: unknown }).code;
         if (errorCode === 4001 || errorCode === 'ACTION_REJECTED') {
           errorMessage = "Signature request rejected by user.";
+          detail = ""; // Don't include generic detail if user rejected
         }
       }
-      throw new Error(errorMessage);
+
+      // Construct the final error message
+      const finalErrorMessage = detail ? `${errorMessage}: ${detail}` : errorMessage;
+      throw new Error(finalErrorMessage); // Throw the more detailed error
     }
   };
 
@@ -278,6 +326,8 @@ export default function Home() {
       toast.info(`Checking availability of ${newFname}...`);
       const isTaken = await isUsernameTaken(newFname);
       if (isTaken) {
+        // Close the dialog if it was somehow left open? Or just show toast.
+        setIsConfirmDialogOpen(false);
         throw new Error(`Username "${newFname}" is already taken.`);
       }
       toast.success(`${newFname} is available!`);
@@ -286,21 +336,30 @@ export default function Home() {
       toast.info(`Please sign the request to release ${fetchedCurrentFname}...`);
       const deleteTimestamp = Math.floor(Date.now() / 1000);
       const deleteSignatureData = await generateSignature(
-        fetchedCurrentFname, // Use fetched name
-        address,
+        fetchedCurrentFname!, // Assert non-null as it's checked before confirmation
+        address!, // Assert non-null as it's checked before confirmation
         deleteTimestamp
       );
       toast.success(`Release signature obtained for ${fetchedCurrentFname}.`);
 
       // 3. Generate signature to register newFname (no change)
       toast.info(`Please sign the request to claim ${newFname}...`);
-      const registerTimestamp = Math.max(deleteTimestamp + 1, Math.floor(Date.now() / 1000));
+      // Ensure registerTimestamp is always >= deleteTimestamp
+      const preRegisterTime = Date.now();
+      let registerTimestamp = Math.max(deleteTimestamp + 1, Math.floor(preRegisterTime / 1000));
+      // Optional: Small delay if timestamps are identical due to fast execution
+      if (registerTimestamp === deleteTimestamp) {
+        await new Promise(resolve => setTimeout(resolve, 10)); // Wait 10ms
+        registerTimestamp = Math.floor(Date.now() / 1000);
+      }
+
       const registerSignatureData = await generateSignature(
         newFname,
-        address,
+        address!, // Assert non-null
         registerTimestamp
       );
       toast.success(`Claim signature obtained for ${newFname}.`);
+
 
       // 4. Call backend API to execute transfers (use fetchedFid and fetchedCurrentFname)
       toast.info("Submitting rename request...");
@@ -313,7 +372,7 @@ export default function Home() {
           currentFname: fetchedCurrentFname, // Use fetched name
           newFname,
           fid: fetchedFid, // Use fetched FID
-          owner: address,
+          owner: address, // Use fetched address
           deleteSignature: deleteSignatureData.signature,
           deleteTimestamp: deleteSignatureData.timestamp,
           registerSignature: registerSignatureData.signature,
@@ -330,15 +389,78 @@ export default function Home() {
       // Update fetched name state and clear new name input
       setFetchedCurrentFname(newFname);
       setNewFname("");
+      setConfirmationInput(""); // Clear confirmation input on success
+      setConfirmationError(null);
 
     } catch (error: unknown) {
       console.error("Rename failed:", error);
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred during the rename process.";
       toast.error(`Rename failed: ${errorMessage}`);
+      setConfirmationError(null); // Clear confirmation error on failure
     } finally {
       setIsLoading(false);
+      setIsConfirmDialogOpen(false); // Ensure dialog closes on success/failure
     }
   };
+
+  // New handler for the button inside the confirmation dialog
+  const handleConfirmRename = () => {
+    setConfirmationError(null); // Clear previous error
+    const requiredPhrase = `change username to ${newFname}`.toLowerCase();
+    if (confirmationInput.toLowerCase() === requiredPhrase) {
+      // Phrase matches, proceed with the actual rename logic
+      setIsConfirmDialogOpen(false); // Close the dialog
+      handleRename(); // Call the original rename function
+    } else {
+      // Phrase does not match, show an error
+      setConfirmationError("Confirmation text does not match. Please type it exactly as shown.");
+    }
+  };
+
+  // Handler to open the dialog
+  const openConfirmationDialog = () => {
+    // Perform preliminary checks before opening the dialog
+    if (!isConnected || !address) {
+      toast.error("Please connect your wallet first.");
+      return;
+    }
+    if (!fetchedFid) {
+      toast.error(isLoadingFid ? "Still determining your FID..." : "Could not determine your FID.");
+      return;
+    }
+    if (isLoadingCurrentFname) {
+      toast.error("Still fetching your current fname...");
+      return;
+    }
+    if (!fetchedCurrentFname) {
+      toast.error("Could not fetch your current Farcaster username. Your FID might not have one assigned.");
+      return;
+    }
+    if (!newFname) {
+      toast.error("Please enter your desired new Farcaster username.");
+      return;
+    }
+    if (fetchedCurrentFname === newFname) {
+      toast.error("New username cannot be the same as the current one.");
+      return;
+    }
+    // Basic validation for fname
+    const fnameRegex = /^[a-z0-9][a-z0-9-]{0,15}$/;
+    if (!fnameRegex.test(newFname)) {
+      toast.error("New username contains invalid characters or is too long (max 16, alphanumeric, hyphen, cannot start/end with hyphen).");
+      return;
+    }
+    if (newFname.startsWith('-') || newFname.endsWith('-')) {
+      toast.error("New username cannot start or end with a hyphen.");
+      return;
+    }
+
+    // If all checks pass, open the dialog
+    setConfirmationInput(""); // Reset input field
+    setConfirmationError(null); // Reset error
+    setIsConfirmDialogOpen(true);
+  };
+
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-4 md:p-24">
@@ -385,7 +507,7 @@ export default function Home() {
                 <Label htmlFor="newFname">New Fname</Label>
                 <Input
                   id="newFname"
-                  placeholder="e.g., vitalik.eth"
+                  placeholder="e.g., vitalik"
                   value={newFname}
                   onChange={(e) => setNewFname(e.target.value.toLowerCase().trim())}
                   disabled={isLoading || !fetchedCurrentFname} // Disable if no current fname or loading
@@ -411,18 +533,78 @@ export default function Home() {
           <CardFooter className="flex flex-col items-center gap-2">
             <Button
               className="w-full"
-              onClick={handleRename}
-              // Disable if loading, no current name fetched, or no new name entered
+              onClick={openConfirmationDialog} // Changed onClick here
+              // Keep existing disabled conditions - maybe refine?
               disabled={isLoading || isLoadingFid || isLoadingCurrentFname || !fetchedCurrentFname || !newFname}
             >
-              {isLoading ? "Renaming..." : "Rename Fname"}
+              {/* Keep button text simple, action happens after dialog */}
+              Rename Fname
             </Button>
             <p className="text-xs text-muted-foreground text-center px-4">
-              This will rename <code className="font-semibold">{fetchedCurrentFname ?? 'your fname'}</code> to <code className="font-semibold">{newFname || '...'}</code>. Requires two signatures.
+              This will rename <code className="font-semibold">{fetchedCurrentFname ?? 'your fname'}</code> to <code className="font-semibold">{newFname || '...'}</code>. Requires confirmation and two signatures.
             </p>
           </CardFooter>
         )}
       </Card>
+
+      {/* Confirmation Dialog */}
+      <Dialog open={isConfirmDialogOpen} onOpenChange={setIsConfirmDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Confirm Fname Change</DialogTitle>
+            <DialogDescription className="pt-2">
+              You are about to change your Farcaster username from
+              <strong className="px-1">{fetchedCurrentFname}</strong> to
+              <strong className="px-1 text-lg">{newFname}</strong>.
+              <br />
+              This action requires two signatures and is processed via the fname server.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid items-center gap-1.5">
+              <Label htmlFor="confirmationText" className="text-left pb-1">
+                To confirm, please type the following exactly:
+                <br />
+                <code className="text-sm font-semibold text-foreground bg-muted px-1.5 py-0.5 rounded">
+                  {/* Display required phrase - ensure newFname is not empty */}
+                  change username to {newFname || '...'}
+                </code>
+              </Label>
+              <Input
+                id="confirmationText"
+                value={confirmationInput}
+                onChange={(e) => {
+                  setConfirmationInput(e.target.value);
+                  // Clear error message as user types
+                  if (confirmationError) setConfirmationError(null);
+                }}
+                placeholder={`Type the phrase above`}
+                className={confirmationError ? "border-red-500" : ""} // Highlight if error
+                disabled={isLoading} // Disable input while rename is in progress
+              />
+              {confirmationError && (
+                <p className="text-sm text-red-500 pt-1">{confirmationError}</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsConfirmDialogOpen(false)} disabled={isLoading}>
+              Cancel
+            </Button>
+            <Button
+              type="button" // Use type="button" to prevent form submission if wrapped in form later
+              onClick={handleConfirmRename}
+              // Disable confirm button if input doesn't match (case-insensitive) or if loading
+              disabled={
+                isLoading ||
+                confirmationInput.toLowerCase() !== `change username to ${newFname}`.toLowerCase()
+              }
+            >
+              {isLoading ? "Processing..." : "Confirm Rename"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <footer className="mt-8 text-center text-sm text-muted-foreground">
         Built by <a href="https://twitter.com/itzlamba" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">itzlambda</a>
       </footer>

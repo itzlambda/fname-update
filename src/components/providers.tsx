@@ -19,7 +19,7 @@ if (!projectId) {
 }
 
 // Define chains
-const chains = [optimism, base, mainnet, sepolia] as const;
+const chains = [optimism, mainnet] as const;
 
 // Create wagmi config using ConnectKit's getDefaultConfig
 const config = createConfig(
