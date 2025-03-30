@@ -14,8 +14,7 @@ import {
 } from "@/components/ui/card";
 import { toast } from "sonner";
 import {
-  isUsernameTaken,
-  generateSignature,
+  executeFnameRename
 } from "@/lib/farcasterUtils";
 import { useFarcasterIdentity } from "@/hooks/useFarcasterIdentity"; // Import the custom hook
 import { FarcasterInfoDisplay } from "@/components/FarcasterInfoDisplay"; // Import the display component
@@ -60,95 +59,46 @@ export default function Home() {
     return true;
   }
 
-  // Rename logic, now using state from the hook
+  // Rename logic, now using the utility function from lib
   const handleActualRename = async () => {
-    // Double-check necessary conditions before proceeding (belt and suspenders)
     if (!isConnected || !address || !fid || !currentFname || !walletClient || !newFname) {
-      toast.error("Missing required information to rename. Please ensure wallet is connected and details are loaded.");
-      setIsLoading(false); // Ensure loading state is reset
-      setIsConfirmDialogOpen(false); // Close dialog if somehow open
+      toast.error("Missing required information. Please ensure wallet is connected and details loaded.");
+      setIsLoading(false);
+      setIsConfirmDialogOpen(false);
       return;
     }
 
-    // Validation is also done inside ConfirmationDialog before calling this,
-    // but can be re-checked here if needed.
-
     setIsLoading(true);
-    toast.info(`Starting rename process for ${currentFname} -> ${newFname} (FID: ${fid})...`);
+    toast.info(`Starting rename: ${currentFname} -> ${newFname}...`);
 
     try {
-      // 1. Check if newFname is available
-      toast.info(`Checking availability of ${newFname}...`);
-      const isTaken = await isUsernameTaken(newFname);
-      if (isTaken) {
-        throw new Error(`Username "${newFname}" is already taken.`);
-      }
-      toast.success(`${newFname} is available!`);
-
-      // 2. Generate signature to delete currentFname
-      toast.info(`Please sign the request to release ${currentFname}...`);
-      const deleteTimestamp = Math.floor(Date.now() / 1000);
-      const deleteSignatureData = await generateSignature(
+      // Call the utility function to perform the core logic
+      toast.info("Checking availability and preparing signatures...");
+      // Note: Signature prompts will happen inside executeFnameRename
+      const success = await executeFnameRename(
         currentFname,
-        address,
-        deleteTimestamp,
-        walletClient // Pass walletClient
-      );
-      toast.success(`Release signature obtained for ${currentFname}.`);
-
-      // 3. Generate signature to register newFname
-      toast.info(`Please sign the request to claim ${newFname}...`);
-      const registerTimestamp = Math.max(deleteTimestamp + 1, Math.floor(Date.now() / 1000));
-
-      const registerSignatureData = await generateSignature(
         newFname,
+        fid,
         address,
-        registerTimestamp,
-        walletClient // Pass walletClient
+        walletClient
       );
-      toast.success(`Claim signature obtained for ${newFname}.`);
 
-      // 4. Call backend API to execute transfers
-      toast.info("Submitting rename request...");
-      const response = await fetch("/api/rename", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          currentFname,
-          newFname,
-          fid,
-          owner: address,
-          deleteSignature: deleteSignatureData.signature,
-          deleteTimestamp: deleteSignatureData.timestamp,
-          registerSignature: registerSignatureData.signature,
-          registerTimestamp: registerSignatureData.timestamp,
-        }),
-      });
-
-      if (!response.ok) {
-        const result = await response.json();
-        throw new Error(result.error || `Server responded with status ${response.status}`);
+      if (success) {
+        toast.success(`Successfully renamed ${currentFname} to ${newFname}!`);
+        setNewFname(""); // Clear input on success
+        // TODO: Implement or call a refetch function from useFarcasterIdentity hook
+        // to update the displayed current fname.
       }
-
-      toast.success(`Successfully renamed ${currentFname} to ${newFname}! FID: ${fid}`);
-      // TODO: Trigger re-fetch of currentFname from the hook instead of manually setting state
-      // For now, we can clear the input, but ideally the hook refetches.
-      setNewFname("");
-      // The hook `useFarcasterIdentity` will automatically refetch the fname when `fid` changes,
-      // but since `fid` doesn't change here, we might need a manual refetch trigger in the hook.
-      // Or, update the state optimistically (less ideal if backend fails later).
-      // Let's leave it for now; user might need to refresh for UI update.
-
+      // If executeFnameRename fails, it throws an error which is caught below.
 
     } catch (error: unknown) {
-      console.error("Rename failed:", error);
+      console.error("Rename process failed:", error);
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+      // Error message from executeFnameRename might indicate partial success/failure
       toast.error(`Rename failed: ${errorMessage}`);
     } finally {
       setIsLoading(false);
-      setIsConfirmDialogOpen(false); // Close dialog regardless of success/failure
+      setIsConfirmDialogOpen(false);
     }
   };
 
