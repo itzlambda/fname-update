@@ -8,7 +8,6 @@ interface FnameRenameFormProps {
     isLoadingCurrentFname: boolean;
     newFname: string;
     setNewFname: (value: string) => void;
-    onOpenConfirmation: () => void; // Callback to open the dialog - used by parent
     isLoading: boolean; // General loading state for the rename process
     isConnected: boolean;
     fid: number | null;
@@ -19,7 +18,6 @@ export function FnameRenameForm({
     isLoadingCurrentFname,
     newFname,
     setNewFname,
-    onOpenConfirmation,
     isLoading,
     isConnected,
     fid,
@@ -66,6 +64,8 @@ export function FnameRenameForm({
                     placeholder="e.g., vitalik"
                     value={newFname}
                     onChange={(e) => setNewFname(e.target.value.toLowerCase().trim())}
+                    // autoComplete='off'
+                    autoComplete='off'
                     // Disable input if there's no current fname to change *from* or if rename is in progress
                     disabled={isLoading || !currentFname || isLoadingCurrentFname}
                 />

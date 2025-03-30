@@ -1,6 +1,7 @@
 import { Hex, bytesToHex } from "viem";
 import { ViemWalletEip712Signer, makeUserNameProofClaim } from "@farcaster/hub-web";
 import { WalletClient } from "viem"; // Import WalletClient type
+import { mainnet } from "viem/chains";
 
 // Type for individual transfer object from fname server
 export type FnameTransfer = {
@@ -113,6 +114,7 @@ export const generateSignature = async (
   // Consider making chain switching more robust or checking current chain if necessary
   // await walletClient.switchChain({ id: 1 }); // Switching chain here might be disruptive, caller should ensure correct chain.
 
+  walletClient.switchChain({ id: mainnet.id });
   const eip712Signer = new ViemWalletEip712Signer(walletClient);
 
   try {

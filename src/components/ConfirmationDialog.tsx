@@ -33,7 +33,7 @@ export function ConfirmationDialog({
     onOpenChange,
     currentFname,
     newFname,
-    onConfirm, // Renamed from handleRename for clarity
+    onConfirm,
     isLoading,
 }: ConfirmationDialogProps) {
     const [confirmationInput, setConfirmationInput] = useState("");
@@ -77,7 +77,6 @@ export function ConfirmationDialog({
         // --- End Pre-confirmation Checks ---
 
 
-        const requiredPhrase = `change username to ${newFname}`.toLowerCase();
         if (confirmationInput.toLowerCase() === requiredPhrase) {
             // Phrase matches, proceed with the actual rename logic passed via onConfirm
             // The parent's onConfirm function will handle closing the dialog on success/failure
@@ -101,7 +100,7 @@ export function ConfirmationDialog({
         onOpenChange(false);
     }
 
-    const requiredPhrase = `change username to ${newFname || '...'}`; // Display phrase
+    const requiredPhrase = newFname;
 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -111,36 +110,33 @@ export function ConfirmationDialog({
                     <DialogDescription className="pt-2">
                         You are about to change your Farcaster username from
                         <strong className="px-1">{currentFname || '...'}</strong> to
-                        <strong className="px-1 text-lg">{newFname || '...'}</strong>.
+                        <strong className="px-1">{newFname || '...'}</strong>.
+                        <br />
                         <br />
                         This action requires two signatures and is processed via the fname server.
                     </DialogDescription>
                 </DialogHeader>
-                <div className="grid gap-4 py-4">
-                    <div className="grid items-center gap-1.5">
-                        <Label htmlFor="confirmationText" className="text-left pb-1">
-                            To confirm, please type the following exactly:
-                            <br />
-                            <code className="text-sm font-semibold text-foreground bg-muted px-1.5 py-0.5 rounded">
-                                {requiredPhrase}
-                            </code>
-                        </Label>
-                        <Input
-                            id="confirmationText"
-                            value={confirmationInput}
-                            onChange={(e) => {
-                                setConfirmationInput(e.target.value);
-                                // Clear error message as user types
-                                if (confirmationError) setConfirmationError(null);
-                            }}
-                            placeholder={`Type the phrase above`}
-                            className={confirmationError ? "border-red-500" : ""} // Highlight if error
-                            disabled={isLoading} // Disable input while rename is in progress
-                        />
-                        {confirmationError && (
-                            <p className="text-sm text-red-500 pt-1">{confirmationError}</p>
-                        )}
-                    </div>
+                <div className="flex flex-col items-center gap-1.5 text-center">
+                    <Label htmlFor="confirmationText" className="px-1">
+                        To confirm, retype your new fname:
+                    </Label>
+                    <p className="text-sm font-semibold text-foreground px-1.5 py-0.5 rounded mb-2 center">{requiredPhrase}</p>
+                    <Input
+                        id="confirmationText"
+                        value={confirmationInput}
+                        onChange={(e) => {
+                            setConfirmationInput(e.target.value);
+                            // Clear error message as user types
+                            if (confirmationError) setConfirmationError(null);
+                        }}
+                        autoComplete='off'
+                        placeholder={`Type the phrase above`}
+                        className={confirmationError ? "border-red-500" : ""} // Highlight if error
+                        disabled={isLoading} // Disable input while rename is in progress
+                    />
+                    {confirmationError && (
+                        <p className="text-sm text-red-500 pt-1">{confirmationError}</p>
+                    )}
                 </div>
                 <DialogFooter>
                     <Button variant="outline" onClick={handleCancel} disabled={isLoading}>

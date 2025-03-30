@@ -98,12 +98,7 @@ export default function Home() {
 
       // 3. Generate signature to register newFname
       toast.info(`Please sign the request to claim ${newFname}...`);
-      const preRegisterTime = Date.now();
-      let registerTimestamp = Math.max(deleteTimestamp + 1, Math.floor(preRegisterTime / 1000));
-      if (registerTimestamp === deleteTimestamp) {
-        await new Promise(resolve => setTimeout(resolve, 10)); // Ensure distinct timestamp
-        registerTimestamp = Math.floor(Date.now() / 1000);
-      }
+      const registerTimestamp = Math.max(deleteTimestamp + 1, Math.floor(Date.now() / 1000));
 
       const registerSignatureData = await generateSignature(
         newFname,
@@ -121,14 +116,14 @@ export default function Home() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          currentFname: currentFname, // Use state from hook
+          currentFname,
           newFname,
-          fid: fid, // Use state from hook
-          owner: address, // Use state from hook
+          fid,
+          owner: address,
           deleteSignature: deleteSignatureData.signature,
           deleteTimestamp: deleteSignatureData.timestamp,
           registerSignature: registerSignatureData.signature,
-          registerTimestamp: registerTimestamp,
+          registerTimestamp: registerSignatureData.timestamp,
         }),
       });
 
@@ -220,16 +215,10 @@ export default function Home() {
             isLoadingCurrentFname={isLoadingCurrentFname}
             newFname={newFname}
             setNewFname={setNewFname}
-            onOpenConfirmation={openConfirmationDialog} // Pass handler to open dialog
             isLoading={isLoading || isLoadingFid || isLoadingCurrentFname} // Pass combined loading state
             isConnected={isConnected}
             fid={fid}
           />
-          {!isConnected && (
-            <p className="text-center text-muted-foreground pt-4">
-              Connect your wallet to manage your fname.
-            </p>
-          )}
         </CardContent>
         {/* Footer is only shown if form is potentially interactive */}
         {isConnected && fid && (
@@ -256,19 +245,17 @@ export default function Home() {
         )}
       </Card>
 
-      {/* Confirmation Dialog - Pass necessary props */}
-      {/* Removed console.log causing linter error */}
       <ConfirmationDialog
         isOpen={isConfirmDialogOpen}
         onOpenChange={setIsConfirmDialogOpen}
         currentFname={currentFname}
         newFname={newFname}
-        onConfirm={handleActualRename} // Pass the actual rename function
-        isLoading={isLoading} // Pass the specific loading state for the rename API calls/signatures
+        onConfirm={handleActualRename}
+        isLoading={isLoading}
       />
 
       <footer className="mt-8 text-center text-sm text-muted-foreground">
-        Built by <a href="https://twitter.com/itzlamba" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">itzlambda</a>
+        Built by <a href="https://twitter.com/itzlambda" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">itzlambda</a>
       </footer>
     </main>
   );
